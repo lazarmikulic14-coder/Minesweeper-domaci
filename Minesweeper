@@ -1,0 +1,463 @@
+// ==================== Enums ====================
+enum CellState {
+    HIDDEN, REVEALED, FLAGGED
+}
+
+enum GameOutcome {
+    IN_PROGRESS, VICTORY, DEFEAT
+}
+
+// ==================== Cell Class ====================
+class Cell {
+    private boolean isMine;
+    private CellState state;
+    private int adjacentMines;
+
+    public Cell() {
+        this.isMine = false;
+        this.state = CellState.HIDDEN;
+        this.adjacentMines = 0;
+    }
+
+    public boolean isMine() { return isMine; }
+    public void setMine(boolean mine) { isMine = mine; }
+    public CellState getState() { return state; }
+    public void setState(CellState state) { this.state = state; }
+    public int getAdjacentMines() { return adjacentMines; }
+    public void setAdjacentMines(int adjacentMines) { this.adjacentMines = adjacentMines; }
+}
+
+// ==================== Custom Queue (No java.util, no native arrays) ====================
+class CoordinateQueue {
+    private static class Node {
+        int row, col;
+        Node next;
+        Node(int row, int col) {
+            this.row = row;
+            this.col = col;
+            this.next = null;
+        }
+    }
+
+    private Node head;
+    private Node tail;
+    private int size;
+
+    public CoordinateQueue() {
+        head = tail = null;
+        size = 0;
+    }
+
+    public void enqueue(int row, int col) {
+        Node newNode = new Node(row, col);
+        if (isEmpty()) {
+            head = tail = newNode;
+        } else {
+            tail.next = newNode;
+            tail = newNode;
+        }
+        size++;
+    }
+
+    public Coordinate dequeue() {
+        if (isEmpty()) throw new IllegalStateException("Queue is empty");
+        Coordinate coord = new Coordinate(head.row, head.col);
+        head = head.next;
+        if (head == null) tail = null;
+        size--;
+        return coord;
+    }
+
+    public boolean isEmpty() {
+        return head == null;
+    }
+
+    public int size() {
+        return size;
+    }
+
+    // Inner class to return coordinate without exposing internal Node
+    public static class Coordinate {
+        public final int row, col;
+        public Coordinate(int row, int col) {
+            this.row = row;
+            this.col = col;
+        }
+    }
+}
+
+// ==================== Board Class ====================
+class Board {
+    private final int size;
+    private final int mineCount;
+    private final Cell[][] grid;
+    private final int[] dx = {-1, -1, -1, 0, 0, 1, 1, 1};
+    private final int[] dy = {-1, 0, 1, -1, 1, -1, 0, 1};
+
+    public Board(int size, int mineCount) {
+        if (size <= 0) throw new IllegalArgumentException("Size must be positive");
+        if (mineCount < 0 || mineCount >= size * size)
+            throw new IllegalArgumentException("Invalid mine count");
+        this.size = size;
+        this.mineCount = mineCount;
+        this.grid = new Cell[size][size];
+        initializeGrid();
+        placeMines();
+        calculateAdjacentMines();
+    }
+
+    private void initializeGrid() {
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                grid[i][j] = new Cell();
+            }
+        }
+    }
+
+    private void placeMines() {
+        java.util.Random rand = new java.util.Random();
+        int placed = 0;
+        while (placed < mineCount) {
+            int row = rand.nextInt(size);
+            int col = rand.nextInt(size);
+            if (!grid[row][col].isMine()) {
+                grid[row][col].setMine(true);
+                placed++;
+            }
+        }
+    }
+
+    private void calculateAdjacentMines() {
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                if (grid[i][j].isMine()) continue;
+                int count = 0;
+                for (int d = 0; d < 8; d++) {
+                    int ni = i + dx[d];
+                    int nj = j + dy[d];
+                    if (ni >= 0 && ni < size && nj >= 0 && nj < size && grid[ni][nj].isMine()) {
+                        count++;
+                    }
+                }
+                grid[i][j].setAdjacentMines(count);
+            }
+        }
+    }
+
+    public void revealCell(int row, int col) {
+        Cell cell = grid[row][col];
+        if (cell.getState() != CellState.HIDDEN) return;
+
+        cell.setState(CellState.REVEALED);
+
+        if (cell.isMine()) return;
+
+        if (cell.getAdjacentMines() == 0) {
+            CoordinateQueue queue = new CoordinateQueue();
+            queue.enqueue(row, col);
+
+            while (!queue.isEmpty()) {
+                CoordinateQueue.Coordinate coord = queue.dequeue();
+                int r = coord.row;
+                int c = coord.col;
+
+                for (int d = 0; d < 8; d++) {
+                    int nr = r + dx[d];
+                    int nc = c + dy[d];
+                    if (nr >= 0 && nr < size && nc >= 0 && nc < size) {
+                        Cell neighbor = grid[nr][nc];
+                        if (neighbor.getState() == CellState.HIDDEN && !neighbor.isMine()) {
+                            neighbor.setState(CellState.REVEALED);
+                            if (neighbor.getAdjacentMines() == 0) {
+                                queue.enqueue(nr, nc);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public GameOutcome getGameState() {
+        int totalCells = size * size;
+        int safeCells = totalCells - mineCount;
+        int revealedSafe = 0;
+        boolean mineRevealed = false;
+
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                Cell cell = grid[i][j];
+                if (cell.getState() == CellState.REVEALED) {
+                    if (cell.isMine()) mineRevealed = true;
+                    else revealedSafe++;
+                }
+            }
+        }
+
+        if (mineRevealed) return GameOutcome.DEFEAT;
+        if (revealedSafe == safeCells) return GameOutcome.VICTORY;
+        return GameOutcome.IN_PROGRESS;
+    }
+
+    public int getSize() { return size; }
+    public Cell getCell(int row, int col) { return grid[row][col]; }
+}
+
+// ==================== Telemetry Data Structures ====================
+class Move {
+    private final int row;
+    private final int col;
+    private final boolean wasSafe;
+
+    public Move(int row, int col, boolean wasSafe) {
+        this.row = row;
+        this.col = col;
+        this.wasSafe = wasSafe;
+    }
+
+    public int getRow() { return row; }
+    public int getCol() { return col; }
+    public boolean wasSafe() { return wasSafe; }
+}
+
+class NodeMove {
+    private final Move data;
+    private NodeMove next;
+
+    public NodeMove(Move data) {
+        this.data = data;
+        this.next = null;
+    }
+
+    public Move getData() { return data; }
+    public NodeMove getNext() { return next; }
+    public void setNext(NodeMove next) { this.next = next; }
+}
+
+class MyLinkedList {
+    private NodeMove head;
+    private int size;
+
+    public MyLinkedList() {
+        head = null;
+        size = 0;
+    }
+
+    public void insert(Move move) {
+        NodeMove newNode = new NodeMove(move);
+        if (head == null) {
+            head = newNode;
+        } else {
+            NodeMove current = head;
+            while (current.getNext() != null) {
+                current = current.getNext();
+            }
+            current.setNext(newNode);
+        }
+        size++;
+    }
+
+    public NodeMove getHead() {
+        return head;
+    }
+
+    public int size() {
+        return size;
+    }
+}
+
+// ==================== Player Class ====================
+class Player {
+    private final Board board;
+    private final MyLinkedList moveHistory;
+    private final java.util.Random random;
+
+    public Player(Board board) {
+        this.board = board;
+        this.moveHistory = new MyLinkedList();
+        this.random = new java.util.Random();
+    }
+
+    public GameOutcome playTurn() {
+        // Collect all hidden cells
+        java.util.ArrayList<int[]> hiddenCells = new java.util.ArrayList<>();
+        int size = board.getSize();
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                if (board.getCell(i, j).getState() == CellState.HIDDEN) {
+                    hiddenCells.add(new int[]{i, j});
+                }
+            }
+        }
+
+        if (hiddenCells.isEmpty()) {
+            return board.getGameState();
+        }
+
+        int[] chosen = hiddenCells.get(random.nextInt(hiddenCells.size()));
+        int row = chosen[0];
+        int col = chosen[1];
+        boolean isMine = board.getCell(row, col).isMine();
+
+        board.revealCell(row, col);
+        moveHistory.insert(new Move(row, col, !isMine));
+
+        return board.getGameState();
+    }
+
+    public MyLinkedList getMoveHistory() {
+        return moveHistory;
+    }
+}
+
+// ==================== Simulator & CSV Generation ====================
+class GamesSimulator {
+    public static Player createBot(Board board) {
+        return new Player(board);
+    }
+
+    public static void main(String[] args) {
+        final int MATCHES = 1000;
+        final int BOARD_SIZE = 8;
+        final int MINES = 6;
+        final String CSV_FILE = "matches.csv";
+
+        try (java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.FileWriter(CSV_FILE))) {
+            // Write CSV header
+            writer.println("MatchId,BotType,Result,TimeMs,TotalClicks");
+
+            for (int matchId = 1; matchId <= MATCHES; matchId++) {
+                Board board = new Board(BOARD_SIZE, MINES);
+                Player bot = createBot(board);
+                long startTime = System.currentTimeMillis();
+
+                GameOutcome outcome = GameOutcome.IN_PROGRESS;
+                while (outcome == GameOutcome.IN_PROGRESS) {
+                    outcome = bot.playTurn();
+                }
+
+                long endTime = System.currentTimeMillis();
+                long timeMs = endTime - startTime;
+                int totalClicks = bot.getMoveHistory().size();
+                String result = outcome.toString();
+
+                writer.printf("%d,%s,%s,%d,%d%n", matchId, "RandomBot", result, timeMs, totalClicks);
+                if (matchId % 100 == 0) {
+                    System.out.println("Simulated " + matchId + " matches...");
+                }
+            }
+            System.out.println("Simulation complete. Data written to " + CSV_FILE);
+        } catch (java.io.IOException e) {
+            System.err.println("Error writing CSV file: " + e.getMessage());
+        }
+    }
+}
+
+// ==================== Milestone 3: Data Analysis ====================
+record MatchSummary(int matchId, String botType, String result, long timeMs, int totalClicks) implements Comparable<MatchSummary> {
+    @Override
+    public int compareTo(MatchSummary other) {
+        return Long.compare(this.timeMs, other.timeMs);
+    }
+}
+
+class MatchDataset {
+    private final java.util.SortedSet<MatchSummary> matches;
+
+    public MatchDataset() {
+        this.matches = new java.util.TreeSet<>();
+    }
+
+    public void add(MatchSummary match) {
+        matches.add(match);
+    }
+
+    public java.util.SortedSet<MatchSummary> getMatches() {
+        return matches;
+    }
+
+    public Double getAverageClicksByResult(String result) {
+        return matches.stream()
+                .filter(m -> m.result().equalsIgnoreCase(result))
+                .mapToInt(MatchSummary::totalClicks)
+                .average()
+                .orElse(0.0);
+    }
+
+    public MatchSummary getMatchWithHighestClickRate() {
+        return matches.stream()
+                .max(java.util.Comparator.comparingDouble(m -> {
+                    long time = m.timeMs() == 0 ? 1 : m.timeMs();
+                    return (double) m.totalClicks() / time;
+                }))
+                .orElse(null);
+    }
+}
+
+class MatchDataFactory {
+    public static MatchSummary parseFromCsvLine(String line) {
+        String[] parts = line.split(",");
+        if (parts.length != 5) throw new IllegalArgumentException("Invalid CSV line: " + line);
+        int matchId = Integer.parseInt(parts[0]);
+        String botType = parts[1];
+        String result = parts[2];
+        long timeMs = Long.parseLong(parts[3]);
+        int totalClicks = Integer.parseInt(parts[4]);
+        return new MatchSummary(matchId, botType, result, timeMs, totalClicks);
+    }
+
+    public static MatchDataset loadFromCsvFile(String filename) throws java.io.IOException {
+        MatchDataset dataset = new MatchDataset();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(filename))) {
+            String header = reader.readLine(); // skip header
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+                MatchSummary match = parseFromCsvLine(line);
+                dataset.add(match);
+            }
+        }
+        return dataset;
+    }
+}
+
+class TestMatchesAnalysis {
+    public static void main(String[] args) {
+        try {
+            MatchDataset dataset = MatchDataFactory.loadFromCsvFile("matches.csv");
+
+            System.out.println("=".repeat(60));
+            System.out.println("MINESWEEPER TELEMETRY REPORT");
+            System.out.println("=".repeat(60));
+            System.out.printf("Total matches analyzed: %d%n%n", dataset.getMatches().size());
+
+            Double avgClicksVictory = dataset.getAverageClicksByResult("VICTORY");
+            Double avgClicksDefeat = dataset.getAverageClicksByResult("DEFEAT");
+
+            System.out.println("--- Average Clicks by Result ---");
+            System.out.printf("  VICTORY: %.2f clicks%n", avgClicksVictory);
+            System.out.printf("  DEFEAT : %.2f clicks%n%n", avgClicksDefeat);
+
+            MatchSummary bestMatch = dataset.getMatchWithHighestClickRate();
+            if (bestMatch != null) {
+                double clickRate = (double) bestMatch.totalClicks() / (bestMatch.timeMs() == 0 ? 1 : bestMatch.timeMs());
+                System.out.println("--- Highest Click Rate Match ---");
+                System.out.printf("  Match ID     : %d%n", bestMatch.matchId());
+                System.out.printf("  Bot Type     : %s%n", bestMatch.botType());
+                System.out.printf("  Result       : %s%n", bestMatch.result());
+                System.out.printf("  Time (ms)    : %d%n", bestMatch.timeMs());
+                System.out.printf("  Total Clicks : %d%n", bestMatch.totalClicks());
+                System.out.printf("  Click Rate   : %.4f clicks/ms%n", clickRate);
+            } else {
+                System.out.println("No matches found in dataset.");
+            }
+
+            System.out.println("\n" + "=".repeat(60));
+            System.out.println("Analysis Complete");
+            System.out.println("=".repeat(60));
+        } catch (java.io.IOException e) {
+            System.err.println("Error reading CSV file: " + e.getMessage());
+            System.err.println("Make sure matches.csv exists from simulation.");
+        }
+    }
+}
